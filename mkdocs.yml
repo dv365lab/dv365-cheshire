@@ -1,0 +1,41 @@
+# Copyright 2020 ETH Zurich and University of Bologna.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+
+site_name: DV365 Cheshire
+theme:
+  name: material
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.expand
+    - navigation.tracking
+    - navigation.sections
+    - navigation.indexes
+    - navigation.footer
+
+markdown_extensions:
+  - markdown_grid_tables:
+  - toc:
+      toc_depth: 3
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.superfences
+
+repo_url: https://github.com/dv365lab/dv365-cheshire
+repo_name: dv365lab/dv365-cheshire
+
+nav:
+- Home:
+  - index.md
+  - Getting Started: gs.md
+- Targets:
+  - tg/index.md
+  - Simulation: tg/sim.md
+  - Xcelium (Chinese): tg/xcelium_zh.md
+  - Xilinx FPGAs: tg/xilinx.md
+  - SoC Integration: tg/integr.md
+- User Manual:
+  - um/index.md
+  - Architecture: um/arch.md
+  - Software Stack: um/sw.md

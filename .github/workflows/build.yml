@@ -1,0 +1,47 @@
+# Copyright 2022 ETH Zurich and University of Bologna.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+
+# Author: Paul Scheffler <paulsc@iis.ee.ethz.ch>
+
+name: build
+
+on: [ push, pull_request, workflow_dispatch ]
+
+jobs:
+
+  build:
+    strategy:
+      matrix:
+        target: [sw, hw, sim]
+      fail-fast: false
+    runs-on: ubuntu-22.04
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v3
+        with:
+          submodules: recursive
+      -
+        name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      -
+        name: Install RISC-V GCC toolchain
+        uses: pulp-platform/pulp-actions/riscv-gcc-install@v2.4.4
+        with:
+          distro: ubuntu-22.04
+          nightly-date: '2023.03.14'
+          target: riscv64-elf
+      -
+        name: Install Bender
+        uses: pulp-platform/pulp-actions/bender-install@v2.4.4
+        with:
+          version: 0.31.0
+      -
+        name: Build target
+        run: uv run --locked make ${{ matrix.target }}-all
+      -
+        name: Check whether clean
+        run: git status && test -z "$(git status --porcelain --ignore-submodules)"

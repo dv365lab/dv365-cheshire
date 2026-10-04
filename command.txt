@@ -1,0 +1,1 @@
+make -f Makefile.xcelium xrun-run BINARY=sw/tests/helloworld.spm.elf

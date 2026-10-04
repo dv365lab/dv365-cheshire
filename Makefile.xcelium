@@ -1,0 +1,154 @@
+# Makefile.xcelium -- Cadence Xcelium simulation flow for Cheshire
+# Usage (from Cheshire root, after `make hw-all sw-all`):
+#   make -f Makefile.xcelium xrun-all
+#   make -f Makefile.xcelium xrun-run BINARY=sw/tests/helloworld.spm.elf
+#   make -f Makefile.xcelium xrun-regress
+#   make -f Makefile.xcelium xrun-gui BINARY=...
+#   make -f Makefile.xcelium xrun-cov BINARY=...
+# Can also be included from cheshire.mk.
+
+############
+#  Paths   #
+############
+CHS_ROOT    ?= $(shell git rev-parse --show-toplevel 2>/dev/null || pwd)
+CHS_XRUN    ?= $(CHS_ROOT)/target/sim/xrun
+CHS_SIM_SRC ?= $(CHS_ROOT)/target/sim/src
+BENDER      ?= bender
+XRUN        ?= xrun
+IMC         ?= imc
+
+XRUN_WORK   ?= $(CHS_XRUN)/work
+XRUN_LIB    ?= $(XRUN_WORK)/xcelium.d
+XRUN_LOGS   ?= $(XRUN_WORK)/logs
+XRUN_WAVES  ?= $(XRUN_WORK)/waves
+XRUN_COV    ?= $(XRUN_WORK)/cov_work
+
+#################
+#  Bender tgts  #
+#################
+# Keep the Xcelium flist on the SoC/RTL simulation targets. The dependency
+# `test` targets include self-testbenches that are not part of the Cheshire SoC
+# compile and fail in Xcelium. The simulation wrapper only needs a tiny subset
+# of VIP helper files (`axi_test.sv` and the JTAG DMI interface/test package).
+# The upstream CVA6 dependency names this CLIC-enabled target as cv64a6_imafdchsclic_sv39.
+CHS_CVA6_CFG    ?= cv64a6_imafdchsclic_sv39
+CHS_SIM_TARGETS ?= -t sim -t rtl -t cva6 -t $(CHS_CVA6_CFG) -t simulation
+CHS_SIM_DEFINES ?=
+
+XRUN_TERA   := $(CHS_XRUN)/xrun.tera
+XRUN_FLIST  := $(CHS_XRUN)/cheshire_soc.f
+
+#################
+#  Testbench    #
+#################
+XRUN_TOP     ?= tb_cheshire_soc
+XRUN_DPI_SRC ?= $(CHS_SIM_SRC)/elfloader.cpp
+
+# 运行期参数，镜像 target/sim/vcs/start.cheshire_soc.sh
+BINARY      ?=
+IMAGE       ?=
+BOOTMODE    ?= 0
+PRELMODE    ?= 1
+SELCFG      ?= 0
+USE_DRAMSYS ?= 0
+SEED        ?= 1
+TIMEOUT_NS  ?=
+
+#################
+#  Xcelium opts #
+#################
+XRUN_COMMON_FLAGS ?= -64bit -xmlibdirname $(XRUN_LIB) -nocopyright -licqueue -ALLOWREDEFINITION
+XRUN_COMP_FLAGS   ?= -sv -timescale 1ns/1ps -access +rwc -lwdgen \
+                     -top $(XRUN_TOP) -f $(XRUN_FLIST) $(XRUN_DPI_SRC) \
+                     $(addprefix +define+,$(CHS_SIM_DEFINES)) \
+                     +define+SELCFG=$(SELCFG) \
+                     -nowarn CUVWSP -nowarn CUVMPW -nowarn SPDUSD -nowarn RECOME
+# For Verisium wave capture, set XRUN_RUN_INPUT=vdebug_probe.tcl.
+XRUN_RUN_INPUT    ?= $(CHS_SIM_SRC)/run.xcelium.tcl
+XRUN_RUN_FLAGS    ?= -R -debug_opts verisium_pp -input $(abspath $(XRUN_RUN_INPUT)) -svseed $(SEED) \
+                     +BINARY=$(if $(BINARY),$(abspath $(BINARY))) \
+                     +IMAGE=$(if $(IMAGE),$(abspath $(IMAGE))) \
+                     +BOOTMODE=$(BOOTMODE) +PRELMODE=$(PRELMODE)
+XRUN_WAVE_FLAGS   ?= -input $(CHS_XRUN)/waves.tcl
+XRUN_COV_FLAGS    ?= -coverage all -covoverwrite -covdut cheshire_soc -covworkdir $(XRUN_COV)
+XRUN_FLAGS        ?=
+
+ifeq ($(USE_DRAMSYS),1)
+  XRUN_COMP_FLAGS += -sysc +define+USE_DRAMSYS   # TODO: 指向你的 DRAMSys/SystemC 构建
+endif
+ifneq ($(TIMEOUT_NS),)
+  XRUN_RUN_FLAGS += +TIMEOUT_NS=$(TIMEOUT_NS)
+endif
+
+TEST_NAME = $(if $(BINARY),$(basename $(notdir $(BINARY))),noelf)
+
+#################
+#  Targets      #
+#################
+.PHONY: xrun-all xrun-flist xrun-compile xrun-run xrun-gui xrun-cov xrun-cov-report \
+        xrun-regress xrun-clean xrun-help
+
+xrun-all: xrun-flist xrun-compile
+
+include $(CHS_ROOT)/target/sim/models.mk
+
+$(CHS_XRUN) $(XRUN_WORK) $(XRUN_LOGS) $(XRUN_WAVES):
+	mkdir -p $@
+
+xrun-flist: $(XRUN_FLIST)
+
+$(XRUN_FLIST): $(CHS_ROOT)/Bender.yml $(CHS_ROOT)/Bender.lock $(CHS_ROOT)/Makefile.xcelium $(CHS_ROOT)/target/sim/models.mk $(CHS_SIM_MODELS_ALL) | $(CHS_XRUN)
+	$(BENDER) script flist-plus $(CHS_SIM_TARGETS) > $@.bender.tmp
+	grep -vE 'target/sim/(src|models)/' $@.bender.tmp > $@.tmp
+	printf '%s\n' \
+	  $(wildcard $(CHS_ROOT)/.bender/git/checkouts/axi-*/src/axi_test.sv) \
+	  $(wildcard $(CHS_ROOT)/.bender/git/checkouts/riscv-dbg-*/src/dmi_intf.sv) \
+	  $(wildcard $(CHS_ROOT)/.bender/git/checkouts/riscv-dbg-*/tb/jtag_dmi/jtag_intf.sv) \
+	  $(wildcard $(CHS_ROOT)/.bender/git/checkouts/riscv-dbg-*/tb/jtag_dmi/jtag_test.sv) \
+	  $(CHS_SIM_MODELS_ALL) \
+	  $(CHS_ROOT)/target/sim/src/tb_cheshire_pkg.sv \
+	  $(CHS_ROOT)/target/sim/src/vip_cheshire_soc.sv \
+	  $(CHS_ROOT)/target/sim/src/fixture_cheshire_soc.sv \
+	  $(CHS_ROOT)/target/sim/src/tb_cheshire_soc.sv \
+	  >> $@.tmp
+	grep -v 'trace_item\.svh' $@.tmp > $@.filtered.tmp
+	mv $@.filtered.tmp $@
+	rm -f $@.tmp $@.bender.tmp
+
+xrun-compile: $(XRUN_FLIST) | $(XRUN_WORK) $(XRUN_LOGS)
+	cd $(XRUN_WORK) && $(XRUN) $(XRUN_COMMON_FLAGS) $(XRUN_COMP_FLAGS) $(XRUN_FLAGS) \
+	  -elaborate -l $(XRUN_LOGS)/compile.log
+
+xrun-run: xrun-compile | $(XRUN_LOGS)
+	@test -n "$(BINARY)" -o -n "$(IMAGE)" || (echo "ERROR: set BINARY=<elf> or IMAGE=<img>"; exit 1)
+	@test -z "$(BINARY)" -o -r "$(abspath $(BINARY))" || (echo "ERROR: binary not found: $(BINARY)"; exit 1)
+	@test -z "$(IMAGE)" -o -r "$(abspath $(IMAGE))" || (echo "ERROR: image not found: $(IMAGE)"; exit 1)
+	cd $(XRUN_WORK) && $(XRUN) $(XRUN_COMMON_FLAGS) $(XRUN_RUN_FLAGS) $(XRUN_FLAGS) \
+	  -l $(XRUN_LOGS)/$(TEST_NAME).log
+	@grep -q "\[PASS\]\|SUCCESS\|exit code 0" $(XRUN_LOGS)/$(TEST_NAME).log && echo "PASS: $(TEST_NAME)" \
+	  || (echo "FAIL: $(TEST_NAME)  (see $(XRUN_LOGS)/$(TEST_NAME).log)"; exit 1)
+
+xrun-gui: | $(XRUN_LOGS) $(XRUN_WAVES)
+	cd $(XRUN_WORK) && $(XRUN) $(XRUN_COMMON_FLAGS) $(XRUN_RUN_FLAGS) $(XRUN_WAVE_FLAGS) \
+	  -gui $(XRUN_FLAGS) -l $(XRUN_LOGS)/$(TEST_NAME).gui.log
+
+xrun-cov: $(XRUN_FLIST) | $(XRUN_WORK) $(XRUN_LOGS)
+	cd $(XRUN_WORK) && $(XRUN) $(XRUN_COMMON_FLAGS) $(XRUN_COMP_FLAGS) $(XRUN_COV_FLAGS) \
+	  $(XRUN_RUN_FLAGS) -covtest $(TEST_NAME) $(XRUN_FLAGS) -l $(XRUN_LOGS)/$(TEST_NAME).cov.log
+
+xrun-cov-report:
+	cd $(XRUN_WORK) && $(IMC) -execcmd "merge -overwrite -out merged $(XRUN_COV)/scope/*; \
+	  load -run merged; report -summary -out $(XRUN_WORK)/cov_summary.txt; exit"
+
+REGRESS_ELFS ?= $(wildcard $(CHS_ROOT)/sw/tests/*.spm.elf)
+xrun-regress: xrun-all
+	@fail=0; for elf in $(REGRESS_ELFS); do \
+	  $(MAKE) -f $(firstword $(MAKEFILE_LIST)) --no-print-directory xrun-run BINARY=$$elf || fail=1; \
+	done; exit $$fail
+
+xrun-clean:
+	rm -rf $(XRUN_WORK) $(XRUN_FLIST) $(CHS_XRUN)/xcelium.d $(CHS_XRUN)/*.log $(CHS_XRUN)/*.history
+
+xrun-help:
+	@echo "Targets: xrun-all xrun-flist xrun-compile xrun-run xrun-gui xrun-cov xrun-cov-report xrun-regress xrun-clean"
+	@echo "Vars   : BINARY IMAGE BOOTMODE PRELMODE SELCFG USE_DRAMSYS SEED TIMEOUT_NS XRUN_FLAGS CHS_SIM_TARGETS"

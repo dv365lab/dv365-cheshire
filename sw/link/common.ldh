@@ -1,0 +1,27 @@
+/* Copyright 2022 ETH Zurich and University of Bologna. */
+/* Licensed under the Apache License, Version 2.0, see LICENSE for details. */
+/* SPDX-License-Identifier: Apache-2.0 */
+
+/* Nicole Narr <narrn@student.ethz.ch> */
+/* Christopher Reinwardt <creinwar@student.ethz.ch> */
+/* Paul Scheffler <paulsc@iis.ee.ethz.ch> */
+
+/* This header defines symbols and rules universal to bare-metal execution */
+
+ENTRY(_start)
+
+/* Memory regions and peripheral base addresses are auto-generated from cheshire.rdl */
+INCLUDE cheshire_addrs.ldh
+
+SECTIONS {
+  /* Keep binaries lean */
+  /DISCARD/ : { *(.riscv.attributes) *(.comment) }
+
+  /* Global and stack pointer */
+  /* By default, keep the calling context (boot ROM) stack pointer */
+  __global_pointer$ = ADDR(.misc) + SIZEOF(.misc) / 2;
+  __stack_pointer$  = 0;
+
+  /* AXI-RT guard register (specific offset within AXI-RT region, not a named block) */
+  __axirtgrd_base_addr__ = 0x020C1ffc;
+}
