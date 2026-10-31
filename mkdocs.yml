@@ -35,6 +35,8 @@ nav:
   - Xcelium (Chinese): tg/xcelium_zh.md
   - Xilinx FPGAs: tg/xilinx.md
   - SoC Integration: tg/integr.md
+- Verification Plans:
+  - Baseline Regression vPlan (Chinese): vplan/baseline-regression.md
 - User Manual:
   - um/index.md
   - Architecture: um/arch.md

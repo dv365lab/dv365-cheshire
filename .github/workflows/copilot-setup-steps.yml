@@ -1,0 +1,82 @@
+# Copyright 2026 DV365 Lab.
+# Licensed under the Apache License, Version 2.0, see LICENSE for details.
+# SPDX-License-Identifier: Apache-2.0
+
+# Environment setup for the GitHub Copilot cloud coding agent.
+#
+# This mirrors .github/workflows/build.yml (same runner image, uv + Python 3.11,
+# RISC-V GCC nightly and Bender 0.31.0) so that the agent starts with a tree in
+# which `make hw-all`, `make sw-all`, single ELF targets and the lint jobs work
+# without trial-and-error installs.
+#
+# Cadence Xcelium / IMC (and QuestaSim, VCS, Vivado) are proprietary and are NOT
+# available on GitHub-hosted runners. The cloud agent can therefore only build
+# and lint; it must never claim RTL simulation or coverage results. Simulation
+# evidence has to come from a licensed machine (see AGENTS.md section 7 and
+# .github/skills/cheshire-verify-change/SKILL.md).
+#
+# Only `steps`, `permissions`, `runs-on`, `services`, `snapshot` and
+# `timeout-minutes` (max 59) of the `copilot-setup-steps` job are honoured.
+
+name: "Copilot Setup Steps"
+
+# Run automatically when this file changes so it can be validated in CI, and
+# allow manual runs from the Actions tab.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  # The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.
+  copilot-setup-steps:
+    # Same image as build.yml; riscv-gcc-install downloads an ubuntu-22.04 nightly.
+    runs-on: ubuntu-22.04
+    # hw-all + sw-all (Bender checkout of CVA6 & friends, PeakRDL generation,
+    # all ELFs and test images) takes several minutes on a standard runner.
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    steps:
+      -
+        name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      -
+        name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.11"
+      -
+        name: Install RISC-V GCC toolchain
+        uses: pulp-platform/pulp-actions/riscv-gcc-install@v2.4.4
+        with:
+          distro: ubuntu-22.04
+          nightly-date: '2023.03.14'
+          target: riscv64-elf
+      -
+        name: Install Bender
+        uses: pulp-platform/pulp-actions/bender-install@v2.4.4
+        with:
+          version: 0.31.0
+      -
+        # `sw-all` already triggers `bender checkout` and most of the register /
+        # header generation, so adding `hw-all` on top costs little extra time
+        # and leaves the generated RTL (hw/regs, cheshire_addrmap_pkg.sv, iDMA)
+        # in place for RTL-side work. Both are exactly what build.yml verifies.
+        name: Check out hardware dependencies, generate RTL and build software
+        run: uv run --locked make -j4 hw-all sw-all
+      -
+        # Logged for the session transcript: tool versions and proof that the
+        # build did not dirty the tree (build.yml enforces the same invariant).
+        name: Report tool versions and tree state
+        run: |
+          bender --version
+          riscv64-unknown-elf-gcc --version | head -n 1
+          uv run --locked python --version
+          git status --porcelain --ignore-submodules
